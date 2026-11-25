@@ -38,9 +38,13 @@ class RuleParser(private val provider: String, private val senders: Regex) : Pro
     override fun parse(sms: Sms): Parsed? {
         val body = sms.body
         if (Regex("\\b(otp|one.time|verification|password|login|sign.in|security code|verification code)\\b", RegexOption.IGNORE_CASE).containsMatchIn(body)) return null
-        val incoming = Regex("received|credited|deposited|refund|reversed|reversal|disbursed", RegexOption.IGNORE_CASE).containsMatchIn(body)
+        // A receipt that also settles a loan has multiple events; retain it for review.
+        if(Regex("received",RegexOption.IGNORE_CASE).containsMatchIn(body) && Regex("used to repay|fuliza.*repay|repay.*fuliza",RegexOption.IGNORE_CASE).containsMatchIn(body)) return null
+        val loanUsage = Regex("fuliza.*(?:used|covered)|used.*fuliza",RegexOption.IGNORE_CASE).containsMatchIn(body)
+        val incoming = loanUsage || Regex("received|credited|deposited|refund|reversed|reversal|disbursed", RegexOption.IGNORE_CASE).containsMatchIn(body)
         val outgoing = Regex("sent|paid|debited|withdraw|bought|purchase|repayment|repaid|charged|transferred", RegexOption.IGNORE_CASE).containsMatchIn(body)
         if (!incoming && !outgoing) return null
+        if(incoming && outgoing && !loanUsage && !Regex("refund|reversed|reversal",RegexOption.IGNORE_CASE).containsMatchIn(body)) return null
         val amountPattern = Regex("(?:Ksh\\.?|KES|KShs\\.?|Kshs\\.?)\\s*([0-9][0-9,]*(?:\\.[0-9]{1,2})?)", RegexOption.IGNORE_CASE)
         // Reject offers and notices; a completed transaction verb must be near the first amount.
         if (Regex("eligible|apply for|offer|could receive|will be|failed|unsuccessful|declined|insufficient|request to", RegexOption.IGNORE_CASE).containsMatchIn(body)) return null
@@ -51,17 +55,18 @@ class RuleParser(private val provider: String, private val senders: Regex) : Pro
         val type = when {
             Regex("refund|reversal|reversed", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "REFUND"
             Regex("repayment|repaid", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "LOAN_REPAYMENT"
-            Regex("disbursed|loan of|fuliza.*(?:used|covered)", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "LOAN"
+            loanUsage || Regex("disbursed|loan of", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "LOAN"
             Regex("withdraw", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "WITHDRAWAL"
             Regex("airtime", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "AIRTIME"
-            Regex("deposited|cash deposit", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "DEPOSIT"
+            Regex("cash deposit|deposited cash", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "DEPOSIT"
             Regex("charged|interest charge", RegexOption.IGNORE_CASE).containsMatchIn(body) -> "CHARGE"
+            Regex("transferred|funds transfer",RegexOption.IGNORE_CASE).containsMatchIn(body) -> "TRANSFER"
             incoming -> "RECEIVED"
             else -> "PAYMENT"
         }
         val reference = Regex("^\\s*([A-Z0-9]{8,16})\\s+(?:Confirmed|confirmed)").find(body)?.groupValues?.get(1)
             ?: Regex("(?:ref(?:erence)?|transaction\\s*(?:id|no|code))\\s*[:#.]?\\s*([A-Z0-9-]{5,30})", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
-        val accountId = Regex("(?:account|a/c|acc)\\s*[:#.]?\\s*([*xX0-9-]{3,24})", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
+        val accountId = if(provider in listOf("M-Pesa","Airtel Money")) null else Regex("(?:your\\s+)?(?:account|a/c|acc)\\s*[:#.]?\\s*([*xX0-9-]{3,24})", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)
         val party = Regex("(?:sent to|paid to|received from|from|to)\\s+(.+?)(?=\\s+on\\s|\\s+at\\s|\\. |\\s+(?:New|Your|Balance|Transaction)\\b|$)", RegexOption.IGNORE_CASE).find(body)?.groupValues?.get(1)?.trim()?.take(120)
         val dateMatch = Regex("\\bon (\\d{1,2}/\\d{1,2}/\\d{2,4}) at (\\d{1,2}:\\d{2}\\s*[AP]M)", RegexOption.IGNORE_CASE).find(body)
         val date = dateMatch?.let { m -> runCatching {
@@ -77,7 +82,7 @@ class RuleParser(private val provider: String, private val senders: Regex) : Pro
             fingerprint(sms))
     }
 }
-fun fingerprint(sms: Sms): String = MessageDigest.getInstance("SHA-256").digest((sms.sender.trim().uppercase() + "|" + sms.subscription + "|" + sms.body.trim().replace(Regex("\\s+"), " ")).toByteArray()).joinToString("") { "%02x".format(it) }
+fun fingerprint(sms: Sms): String = MessageDigest.getInstance("SHA-256").digest((sms.sender.trim().uppercase() + "|" + sms.subscription + "|" + sms.received + "|" + sms.body.trim().replace(Regex("\\s+"), " ")).toByteArray()).joinToString("") { "%02x".format(it) }
 object ParserRegistry {
     val providers = linkedMapOf("M-Pesa" to "MPESA|M-PESA|SAFARICOM", "Airtel Money" to "AIRTEL|AIRTELMONEY", "Equity" to "EQUITY|EQUITEL", "KCB" to "KCB", "Co-operative Bank" to "CO.?OP|COOPERATIVE", "NCBA" to "NCBA|CBA", "Absa" to "ABSA|BARCLAYS", "Standard Chartered" to "SCBANK|STANCHART|STANDARDCHARTERED", "Family Bank" to "FAMILY", "I&M Bank" to "I&M|IMBANK", "SACCO" to "SACCO")
     private val parsers = providers.map { (name, pattern) -> RuleParser(name, Regex(pattern, RegexOption.IGNORE_CASE)) }

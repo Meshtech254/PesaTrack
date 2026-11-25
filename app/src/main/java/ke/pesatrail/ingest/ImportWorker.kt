@@ -13,6 +13,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import ke.pesatrail.data.*
 import ke.pesatrail.domain.*
+import ke.pesatrail.BuildConfig
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 
@@ -20,6 +21,7 @@ import kotlinx.coroutines.flow.first
 interface ImportDependencies { fun repository(): Repository; fun preferences(): Preferences }
 class ImportWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context,params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
+        if (!BuildConfig.SMS_ENABLED) return@withContext Result.failure()
         val deps = EntryPointAccessors.fromApplication(applicationContext,ImportDependencies::class.java)
         val repo = deps.repository()
         val scanId = inputData.getString("scan")

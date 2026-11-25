@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Explicitly synthetic. Import only when intentionally testing. -->
+<smses count="5">
+  <sms address="MPESA" date="1793942000000" body="SYN0000001 Confirmed. You have received Ksh10,000.00 from SYNTHETIC PERSON on 6/11/26 at 9:00 AM. New M-PESA balance is Ksh10,000.00." />
+  <sms address="MPESA" date="1793942600000" body="SYN0000002 Confirmed. Ksh1,000.00 paid to SYNTHETIC NAIVAS on 6/11/26 at 9:10 AM. New M-PESA balance is Ksh8,987.00. Transaction cost, Ksh13.00." />
+  <sms address="MPESA" date="1793943200000" body="SYN0000003 Confirmed. Withdraw Ksh2,000.00 from SYNTHETIC AGENT on 6/11/26 at 9:20 AM. New M-PESA balance is Ksh6,960.00. Transaction cost, Ksh27.00." />
+  <sms address="MPESA" date="1793943800000" body="SYN0000004 Confirmed. Ksh1,000.00 refunded from SYNTHETIC NAIVAS on 6/11/26 at 9:30 AM. New M-PESA balance is Ksh7,960.00." />
+  <sms address="KCB" date="1793944400000" body="Your account 1234 has been credited KES 5,000.00 from SYNTHETIC EMPLOYER. Ref SYN0000005. Available balance KES 12,000.00." />
+</smses>

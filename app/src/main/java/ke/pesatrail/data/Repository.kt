@@ -10,20 +10,22 @@ import java.util.Locale
 class Repository @Inject constructor(val db: LedgerDatabase, val dao: LedgerDao) {
     suspend fun ingest(sms: Sms, method: String): String = db.withTransaction {
         val rule = dao.rules().firstOrNull { sms.sender.equals(it.sender,true) && sms.body.contains(it.contains,true) }
-        val parsed = ParserRegistry.parse(sms) ?: rule?.let {
+        var parsed = ParserRegistry.parse(sms) ?: rule?.let {
             // Local rules only authorize a sender; the same OTP/notice guards still apply.
             RuleParser(sms.sender, Regex(Regex.escape(sms.sender),RegexOption.IGNORE_CASE)).parse(sms)
                 ?.copy(direction=it.direction, category=it.category, confidence=50)
         }
+        if(rule != null) parsed=parsed?.copy(direction=rule.direction,category=rule.category,confidence=50)
         if (parsed == null) {
-            if ((ParserRegistry.recognized(sms.sender) || rule != null) && !Regex("otp|password|verification|login",RegexOption.IGNORE_CASE).containsMatchIn(sms.body)) {
+            val financial=Regex("(?:Ksh|KES)",RegexOption.IGNORE_CASE).containsMatchIn(sms.body) && Regex("credited|debited|paid|received|sent|withdraw|deposit|refund|reversed",RegexOption.IGNORE_CASE).containsMatchIn(sms.body)
+            if ((ParserRegistry.recognized(sms.sender) || rule != null || financial) && !Regex("otp|password|verification|login",RegexOption.IGNORE_CASE).containsMatchIn(sms.body)) {
                 dao.review(Review(fingerprint(sms),sms.sender,sms.body,sms.received,"Unrecognized format; no transaction created",sms.subscription))
             }
             return@withTransaction "unsupported"
         }
         val p = parsed
         val mapped = p.party?.lowercase(Locale.ROOT)?.let { dao.category(it) }
-        val tx = Transaction(reference=p.reference, externalKey=p.reference?.let { "${p.provider}|${p.account}|${p.type}|${it.uppercase()}" },
+        val tx = Transaction(reference=p.reference, externalKey=p.reference?.let { "${p.provider}|${p.type}|${it.uppercase()}" },
             sender=sms.sender, provider=p.provider, account=p.account,
             sourceName=if(p.direction=="IN") p.party else null, sourceIdentifier=if(p.direction=="IN") p.identifier else null,
             destinationName=if(p.direction!="IN") p.party else null, destinationIdentifier=if(p.direction!="IN") p.identifier else null,

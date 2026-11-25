@@ -15,7 +15,15 @@ import ke.pesatrail.security.Vault
 import net.zetetic.database.sqlcipher.SupportOpenHelperFactory
 
 @HiltAndroidApp
-class PesaTrailApp : Application()
+class PesaTrailApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        if (!BuildConfig.SMS_ENABLED) {
+            val work = androidx.work.WorkManager.getInstance(this)
+            listOf("history", "periodic-sms", "reconcile").forEach { work.cancelUniqueWork(it) }
+        }
+    }
+}
 @Module @InstallIn(SingletonComponent::class)
 object StorageModule {
     @Provides @Singleton fun database(@ApplicationContext context: Context): LedgerDatabase {

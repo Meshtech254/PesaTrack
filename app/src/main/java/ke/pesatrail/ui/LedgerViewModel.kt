@@ -2,6 +2,7 @@ package ke.pesatrail.ui
 
 import android.app.Application
 import android.net.Uri
+import ke.pesatrail.BuildConfig
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.*
@@ -35,16 +36,19 @@ import java.util.concurrent.TimeUnit
     fun bool(key: String,value: Boolean) = task { preferences.bool(key,value) }
     fun text(key: String,value: String) = task { preferences.text(key,value) }
     fun scan(from: Long, until: Long, resume: Boolean = false) = task {
+        if (!BuildConfig.SMS_ENABLED) { notice.value="Use a local XML backup or add transactions manually in this version."; return@task }
         require(from <= until)
+        if(scan.value?.status in listOf("Queued","Scanning")) { notice.value="A scan is already running. Cancel it before starting another."; return@task }
         val s = if(resume) scan.value ?: Scan(from=from,until=until) else Scan(from=from,until=until)
         repo.dao.saveScan(s.copy(status="Queued"))
         WorkManager.getInstance(getApplication()).enqueueUniqueWork("history",ExistingWorkPolicy.KEEP,OneTimeWorkRequestBuilder<ImportWorker>().setInputData(workDataOf("scan" to s.id)).build())
     }
-    fun cancel() { WorkManager.getInstance(getApplication()).cancelUniqueWork("history"); fileJob?.cancel() }
+    fun cancel() { WorkManager.getInstance(getApplication()).cancelUniqueWork("history"); fileJob?.cancel(); task { scan.value?.let { repo.dao.saveScan(it.copy(status="Paused; resume available")) } } }
     fun reconciliation(enabled: Boolean) = task {
-        preferences.bool("reconcile",enabled)
+        val allowed = enabled && BuildConfig.SMS_ENABLED
+        preferences.bool("reconcile",allowed)
         val wm = WorkManager.getInstance(getApplication())
-        if(enabled) wm.enqueueUniquePeriodicWork("periodic-sms",ExistingPeriodicWorkPolicy.KEEP,PeriodicWorkRequestBuilder<ImportWorker>(12,TimeUnit.HOURS).build()) else wm.cancelUniqueWork("periodic-sms")
+        if(allowed) wm.enqueueUniquePeriodicWork("periodic-sms",ExistingPeriodicWorkPolicy.KEEP,PeriodicWorkRequestBuilder<ImportWorker>(12,TimeUnit.HOURS).build()) else wm.cancelUniqueWork("periodic-sms")
     }
     fun importXml(uri: Uri, from: Long, until: Long) {
         if(busy.value) return
@@ -52,9 +56,10 @@ import java.util.concurrent.TimeUnit
             busy.value=true; var s = Scan(from=from,until=until,status="Importing XML")
             try {
                 repo.dao.saveScan(s)
+                val selected=preferences.settings.first().providers.split('|').filter{it.isNotBlank()}
                 getApplication<Application>().contentResolver.openInputStream(uri)?.use { stream ->
                     SmsBackupReader.read(stream) { sms ->
-                        val result = if(sms.received in from..until) repo.ingest(sms,"XML") else "unsupported"
+                        val result = if(sms.received in from..until && (selected.isEmpty() || ParserRegistry.parse(sms)?.provider in selected)) repo.ingest(sms,"XML") else "unsupported"
                         s=s.copy(processed=s.processed+1,imported=s.imported+if(result=="imported")1 else 0,duplicates=s.duplicates+if(result=="duplicate")1 else 0,unsupported=s.unsupported+if(result=="unsupported")1 else 0)
                         fileProgress.value="${s.processed} processed · ${s.imported} imported"
                         if(s.processed % 100 == 0) repo.dao.saveScan(s)
@@ -80,11 +85,18 @@ import java.util.concurrent.TimeUnit
         val salt=ByteArray(16).also(SecureRandom()::nextBytes)
         preferences.text("salt",Base64.getEncoder().encodeToString(salt))
         preferences.text("pinHash",Base64.getEncoder().encodeToString(PortableBackup.pinHash(pin,salt)))
+        preferences.pinAttempts(0,0)
         notice.value="App PIN enabled. Auto-lock activates after one minute away."
     }
     suspend fun checkPin(pin: String): Boolean = withContext(Dispatchers.IO) {
-        val s=settings.value ?: return@withContext false
-        runCatching { MessageDigest.isEqual(Base64.getDecoder().decode(s.pinHash),PortableBackup.pinHash(pin,Base64.getDecoder().decode(s.salt))) }.getOrDefault(false)
+        val s=preferences.settings.first()
+        if(System.currentTimeMillis()<s.pinBlockedUntil) { notice.value="Too many attempts. Wait 30 seconds.";return@withContext false }
+        val valid=runCatching { MessageDigest.isEqual(Base64.getDecoder().decode(s.pinHash),PortableBackup.pinHash(pin,Base64.getDecoder().decode(s.salt))) }.getOrDefault(false)
+        if(valid)preferences.pinAttempts(0,0) else {
+            val failures=s.pinFailures+1
+            preferences.pinAttempts(if(failures>=5)0 else failures,if(failures>=5)System.currentTimeMillis()+30_000 else 0)
+        }
+        valid
     }
     fun export(uri: Uri, records: List<Transaction>) = task {
         getApplication<Application>().contentResolver.openOutputStream(uri,"wt")!!.bufferedWriter().use { it.write(backup.csv(records)) }; notice.value="Selected transactions exported. CSV is unencrypted."
@@ -94,7 +106,11 @@ import java.util.concurrent.TimeUnit
         getApplication<Application>().contentResolver.openOutputStream(uri,"wt")!!.use { it.write(bytes) }; bytes.fill(0); notice.value="Encrypted backup saved. Keep the passphrase separately."
     }
     fun restoreBackup(uri: Uri, password: String) = task {
-        val bytes=getApplication<Application>().contentResolver.openInputStream(uri)!!.use { it.readNBytes(52_428_801) }
+        val bytes=getApplication<Application>().contentResolver.openInputStream(uri)!!.use { stream ->
+            val output=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+            while(true) { val n=stream.read(buffer);if(n<0)break;require(output.size()+n<=52_428_800){"Backup exceeds 50 MiB"};output.write(buffer,0,n) }
+            output.toByteArray()
+        }
         backup.restore(bytes,password.toCharArray()); bytes.fill(0); notice.value="Backup restored; duplicate records skipped."
     }
 }

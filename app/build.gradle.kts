@@ -12,12 +12,25 @@ android {
         applicationId = "ke.pesatrail"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
     }
     buildFeatures { compose = true; buildConfig = true }
+    flavorDimensions += "ingestion"
+    productFlavors {
+        create("manual") {
+            dimension = "ingestion"
+            buildConfigField("boolean", "SMS_ENABLED", "false")
+        }
+        create("sms") {
+            dimension = "ingestion"
+            versionCode = 3
+            versionName = "1.1.0"
+            buildConfigField("boolean", "SMS_ENABLED", "true")
+        }
+    }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
     buildTypes { release { isMinifyEnabled = false; proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro") } }
@@ -27,9 +40,10 @@ android {
 kapt { correctErrorTypes = true }
 dependencies {
     implementation("com.google.code.gson:gson:2.13.2")
-    implementation(platform("androidx.compose:compose-bom:2025.09.01"))
+    val composeBom = platform("androidx.compose:compose-bom:2025.10.01")
+    implementation(composeBom)
+    androidTestImplementation(composeBom)
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.11.0")
     implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")

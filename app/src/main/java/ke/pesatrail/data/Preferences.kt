@@ -11,8 +11,9 @@ import kotlinx.coroutines.flow.map
 private val Context.preferences by preferencesDataStore("privacy")
 @Singleton class Preferences @Inject constructor(@ApplicationContext context: Context) {
     private val store = context.preferences
-    val settings = store.data.map { p -> Settings(p[booleanPreferencesKey("onboarded")] ?: false,p[booleanPreferencesKey("biometric")] ?: false,p[stringPreferencesKey("pinHash")] ?: "",p[stringPreferencesKey("salt")] ?: "",p[stringPreferencesKey("theme")] ?: "System",p[stringPreferencesKey("providers")] ?: "",p[booleanPreferencesKey("reconcile")] ?: false) }
+    val settings = store.data.map { p -> Settings(p[booleanPreferencesKey("onboarded")] ?: false,p[booleanPreferencesKey("biometric")] ?: false,p[stringPreferencesKey("pinHash")] ?: "",p[stringPreferencesKey("salt")] ?: "",p[stringPreferencesKey("theme")] ?: "System",p[stringPreferencesKey("providers")] ?: "",p[booleanPreferencesKey("reconcile")] ?: false,p[intPreferencesKey("pinFailures")] ?: 0,p[longPreferencesKey("pinBlockedUntil")] ?: 0L,p[stringPreferencesKey("range")] ?: "90") }
     suspend fun bool(key: String, value: Boolean) { store.edit { it[booleanPreferencesKey(key)] = value } }
     suspend fun text(key: String, value: String) { store.edit { it[stringPreferencesKey(key)] = value } }
+    suspend fun pinAttempts(failures: Int, blockedUntil: Long) { store.edit { it[intPreferencesKey("pinFailures")]=failures;it[longPreferencesKey("pinBlockedUntil")]=blockedUntil } }
 }
-data class Settings(val onboarded: Boolean, val biometric: Boolean, val pinHash: String, val salt: String, val theme: String, val providers: String, val reconcile: Boolean)
+data class Settings(val onboarded: Boolean, val biometric: Boolean, val pinHash: String, val salt: String, val theme: String, val providers: String, val reconcile: Boolean, val pinFailures: Int, val pinBlockedUntil: Long, val range: String)

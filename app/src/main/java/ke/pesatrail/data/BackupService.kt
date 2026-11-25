@@ -10,7 +10,7 @@ data class BackupSnapshot(val version: Int = 1, val transactions: List<Transacti
 class BackupService @Inject constructor(private val repo: Repository) {
     suspend fun create(password: CharArray): ByteArray {
         val snapshot = repo.db.withTransaction { val d = repo.dao
-            BackupSnapshot(transactions=d.all(),accounts=d.allAccounts(),reviews=d.allReviews(),rules=d.rules(),mappings=d.allMappings(),budgets=d.budgets().first(),goals=d.goals().first()) }
+            BackupSnapshot(transactions=d.all(),accounts=d.allAccounts(),reviews=d.allReviews(),rules=d.rules(),mappings=d.allMappings(),budgets=d.allBudgets(),goals=d.allGoals()) }
         val plaintext = Gson().toJson(snapshot).toByteArray()
         return try { PortableBackup.encrypt(plaintext,password) } finally { plaintext.fill(0); password.fill('\u0000') }
     }

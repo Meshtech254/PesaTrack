@@ -14,7 +14,7 @@ data class Transaction(
     val direction: String, val occurred: Long, val received: Long, val balance: Long? = null,
     val category: String, val description: String = "", val original: String = "", val confidence: Int = 100,
     val importMethod: String, val imported: Long = System.currentTimeMillis(), val modified: Boolean = false,
-    val fingerprint: String, val excluded: Boolean = false, val dateInferred: Boolean = false, val notes: String = ""
+    val fingerprint: String, val excluded: Boolean = false, val dateInferred: Boolean = false, val notes: String = "", val goalId: String? = null
 ) { fun entry() = Entry(amount, fee ?: 0, direction, type, excluded); val party get() = merchant ?: destinationName ?: sourceName ?: description.ifBlank { type.lowercase().replace('_',' ') } }
 @Entity(tableName="accounts")
 data class Account(@PrimaryKey val id: String, val name: String, val provider: String, val kind: String = "Other financial account", val archived: Boolean = false)
@@ -24,8 +24,8 @@ data class Review(@PrimaryKey val fingerprint: String, val sender: String, val b
 data class LocalRule(@PrimaryKey val id: String = UUID.randomUUID().toString(), val sender: String, val contains: String, val direction: String, val category: String)
 @Entity(tableName="mappings")
 data class MerchantCategory(@PrimaryKey val merchant: String, val category: String)
-@Entity(tableName="budgets")
-data class Budget(@PrimaryKey val category: String, val amount: Long, val weekly: Boolean = false)
+@Entity(tableName="budgets",primaryKeys=["category","weekly"])
+data class Budget(val category: String, val amount: Long, val weekly: Boolean = false)
 @Entity(tableName="goals")
 data class Goal(@PrimaryKey val id: String = UUID.randomUUID().toString(), val name: String, val target: Long, val targetDate: String, val allocated: Long = 0)
 @Entity(tableName="scans")
@@ -58,9 +58,11 @@ interface LedgerDao {
     @Query("SELECT * FROM rules") suspend fun rules(): List<LocalRule>
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveBudget(budget: Budget)
     @Query("SELECT * FROM budgets") fun budgets(): Flow<List<Budget>>
+    @Query("SELECT * FROM budgets") suspend fun allBudgets(): List<Budget>
     @Delete suspend fun deleteBudget(budget: Budget)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveGoal(goal: Goal)
     @Query("SELECT * FROM goals") fun goals(): Flow<List<Goal>>
+    @Query("SELECT * FROM goals") suspend fun allGoals(): List<Goal>
     @Delete suspend fun deleteGoal(goal: Goal)
     @Insert(onConflict=OnConflictStrategy.REPLACE) suspend fun saveScan(scan: Scan)
     @Query("SELECT * FROM scans ORDER BY started DESC LIMIT 1") fun scan(): Flow<Scan?>
@@ -68,3 +70,5 @@ interface LedgerDao {
 }
 @Database(entities=[Transaction::class, Account::class, Review::class, LocalRule::class, MerchantCategory::class, Budget::class, Goal::class, Scan::class], version=1, exportSchema=true)
 abstract class LedgerDatabase : RoomDatabase() { abstract fun ledger(): LedgerDao }
+
+suspend fun LedgerDatabase.clearImportedHistory() = withTransaction { ledger().clearImported(); ledger().clearReviews() }
